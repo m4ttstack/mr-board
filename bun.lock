@@ -5,7 +5,7 @@
     "": {
       "name": "mr-board",
       "dependencies": {
-        "@workforge/glance-sdk": "^0.11.0",
+        "@workforge/glance-sdk": "^0.12.0",
         "invadrs": "^0.2.0",
         "react": "19.2.7",
         "react-dom": "19.2.7",
@@ -46,7 +46,7 @@
 
     "@ungap/structured-clone": ["@ungap/structured-clone@1.3.3", "", {}, "sha512-60YRaenCQcVjYEKOcG824+DRGGIQ3VKErcBoAEDJZz5bKIs2ZG+X/H9Nk+Q6EVkwJk5QNApxbrc5QtBSwtrXAg=="],
 
-    "@workforge/glance-sdk": ["@workforge/glance-sdk@0.11.0", "", { "dependencies": { "@gitbeaker/rest": "^43.8.0" } }, "sha512-BjTfK8x2kD+M11V4/dWPsVr0WfEgujfj4aEw1CvVdlN1y0hr9oKQRBo7NlCihxsFIUtY1SZOh6T6vN+uDIjHzg=="],
+    "@workforge/glance-sdk": ["@workforge/glance-sdk@0.12.0", "", { "dependencies": { "@gitbeaker/rest": "^43.8.0" } }, "sha512-Jf4wLjZsvcwIsuM9PxkZXclicohQN90arBB14W6PnScu/OUkS8fiEBv1W8k96yEQTfpysc2ijqw6SiZ0y0ENtg=="],
 
     "bail": ["bail@2.0.2", "", {}, "sha512-0xO6mYd7JB2YesxDKplafRpsiOzPt9V02ddPCLbY1xYGPOX24NTyN50qnUxgCPcSoYMhKpAuBTjQoRZCAkUDRw=="],
 
