@@ -1,0 +1,108 @@
+{
+  "threads": [
+    {
+      "status": "replied",
+      "notes": [
+        {
+          "id": 3697085204,
+          "name": "Doug Treadwell",
+          "username": "doug-at-assured",
+          "at": "2025-08-18T20:22:04.846Z",
+          "body": "[BLOCKING] This guard is a stale-codegen workaround that should come out before merge \u2014 and while it doesn't change behavior today, it disables the check that would catch it if the wiring ever broke.\n\n`weatherUserDescriptors` is now selected in `IncidentHighlightsPartyFields`, which is spread into `IncidentIncidentFields` \u2192 `AutoClaimIncidentFields` \u2192 `getContactMergedClaimEntity` \u2014 and `AnnotatedAutoClaimIncident` is derived from `AutoClaimIncidentFieldsFragment`. So after `pnpm genTypes` (which CI runs on every pipeline, since `generatedX/graphql.ts` isn't committed) `AnnotatedParty` really does have `$weatherUserDescriptors`, and the JSDoc's premise no longer holds.\n\nThe reason to fix it rather than leave it: `'$weatherUserDescriptors' in party` turns a *compile-time* guarantee into a *runtime* one. Today the type system would fail the build if that field were dropped from the fragment; with the `in` check in place, the same regression compiles clean and silently returns `[]` \u2014 the Sidekick half of this highlight just stops firing, with no test failure (the unit fixtures hand-build the leaves) and no type error. That's the exact silent-fragment-break class we keep getting bitten by, and this guard makes it undetectable.\n\nDropping just the guard:\n\n```ts\nfunction $reportingPartyWeatherDescriptors(\n  incident: AnnotatedAutoClaimIncident,\n): WeatherArraySourceLeaves {\n  const $weatherUserDescriptors =\n    getReportingParty(incident)?.$weatherUserDescriptors;\n  return Array.isArray($weatherUserDescriptors) ? $weatherUserDescriptors : [];\n}\n```\n\nIf that doesn't type-check locally, it means `genTypes` hasn't been re-run since `highlights.graphql` changed \u2014 running it is the fix, not the guard.\n\n_(Edited: my original version also called the `Array.isArray` normalization redundant because `filterByValue` re-checks. Withdrawing that \u2014 `$weatherUserDescriptors` really is a bare `AnnotatedLeaf<undefined>` rather than an array when the party has no descriptors, so normalizing here is a contract this helper is entitled to offer regardless of what its callers happen to do. The finding is only about the `in` guard.)_"
+        },
+        {
+          "id": 3699387444,
+          "name": "Jorge Coello",
+          "username": "jorgecoello",
+          "at": "2025-08-19T09:00:00.000Z",
+          "body": "Removed the guard and took your version. After genTypes the field resolves without\nthe `in` check, so the compile-time guarantee is back. Kept the Array.isArray\nnormalization."
+        }
+      ]
+    },
+    {
+      "status": "replied",
+      "notes": [
+        {
+          "id": 3697091352,
+          "name": "Doug Treadwell",
+          "username": "doug-at-assured",
+          "at": "2025-08-18T20:24:48.213Z",
+          "body": "@alicia.palmer \u2014 QA heads-up on how to actually reach these cards, since the intake gating is narrower than it looks and a \"no card appeared\" result is easy to misread as a bug.\n\n> **Correction (edited).** My original version of this note told you Sidekick was the *easy* repro path. That was wrong \u2014 the Sidekick weather-descriptors step is **not in the flow at all** any more (details below). Please read the FNOL section as the only live path. Sorry for the misdirection.\n\nThe two Temperature factor cards fire off user-reported `HOT` / `COLD` weather descriptors, which live in **two different places** depending on the module.\n\n**Sidekick \u2014 not reachable on a new claim.** The `weatherUserDescriptors_v2` step (\"To the best of your recollection, what was the weather at the time of the incident?\") wrote `HOT`/`COLD` onto the reporting party, but the rule that put it in the flow was **removed on 2026-05-11** by AUTO-7001 (\"Removing SK options\", 70ade66f) \u2014 it was also delisted from the voice-intake step inventory in the same commit. The step object and its `v2Registry` entry still exist, but no module wires it, so **no new Sidekick claim can populate this field**. Only Sidekick claims filed *before* that date can carry it, and even then only ones classified `WEATHER` (the old rule's filter). So please don't spend time trying to drive a fresh Sidekick claim to these cards \u2014 if you want to exercise that branch it needs a pre-May-11 weather claim, or seeded data.\n\n**FNOL / standard \u2014 the live path.** The `incidentWeatherUserDescriptors` step only renders in one of these cases:\n1. You answer **\"Nope\" \ud83d\ude41** to *\"Just making sure we're on the same page \u2013 does this describe the weather at the time of the \u2026?\"*, **or**\n2. no forecast could be derived for the claim, in which case you get a single **\"Got it\"** button that records the same thing.\n\nAnd even when it renders, the option list depends on classification: on a **WEATHER**-classified claim with weather-collision enhancements enabled the list swaps to the weather-related descriptors, which contain **no Hot/Cold at all**. Hot/Cold only appear in the default (full) list.\n\nAlso note **theft / vandalism / rodent-damage** claims skip the weather-forecast confirm step entirely, so they never reach the descriptors step and can never produce these cards.\n\n**First Contact / intelligent_investigation** has no weather-descriptors step. An FC claim shows the card only if the originating FNOL collected it.\n\nOther things worth exercising:\n- **Both cards can appear at once** \u2014 the question is multi-select, so Hot + Cold together is expected, not a duplicate-card bug.\n- With no reporter name resolvable the copy falls back to *\"The reporting party said it was hot\"* \u2014 also intended.\n\n@jorgecoello \u2014 two doc items fall out of this:\n1. The sources doc's Sidekick section states the SK step \"persists the same enum onto the **reporting party**\" in the present tense, and the MR description says \"Sidekick reads the reporting party's weather descriptors\". Given AUTO-7001 unwired that step, that branch now only serves historical claims \u2014 worth saying so explicitly, since as written it reads as a live second source.\n2. The \"Non-obvious details / gotchas\" section frames the FNOL gating as *\"weather-loss claims often will not have this card \u2026 on weather-classified FNOL with enhancements on\"*, which understates it: on FNOL the descriptors step doesn't render **at all** unless the forecast was rejected or unavailable, regardless of classification."
+        },
+        {
+          "id": 3699386870,
+          "name": "Jorge Coello",
+          "username": "jorgecoello",
+          "at": "2025-08-19T08:59:53.161Z",
+          "body": "Both doc items done. Sidekick section is now labeled historical only (AUTO-7001\nunwired the step on 2026-05-11). Gotchas now state the real FNOL gate: the\ndescriptors step only renders after a forecast reject or when no forecast exists.\n@alicia.palmer the repro path is in the sources doc now. Hot + Cold together and the\n\"The reporting party said it was hot\" fallback are both intended."
+        }
+      ]
+    },
+    {
+      "status": "replied",
+      "notes": [
+        {
+          "id": 3697106503,
+          "name": "Doug Treadwell",
+          "username": "doug-at-assured",
+          "at": "2025-08-18T20:32:03.714Z",
+          "body": "[NON-BLOCKING] **This section describes a step that is no longer in any flow** \u2014 the Sidekick branch is real but serves only historical claims, and the doc reads as though it's a live second source.\n\n`weatherUserDescriptors_v2` still exists and is still in `V2_REGISTRY`, but the `rule({ key: 'weatherUserDescriptors', step: weatherUserDescriptors })` that put it in the Sidekick flow was deleted from `100-auto-sidekick.ts` on 2026-05-11 by **AUTO-7001 \"Removing SK options\"** (`70ade66f`) \u2014 the same commit also removed it from `AUTO_CLAIMS_NON_DATA_WORKFLOW_STEP_KEYS` in `autoClaimsIntakeInventory.ts`.\n\nHow I checked, in case it's worth re-verifying:\n- On current `origin/master`, `rg weatherUserDescriptors apps/backend/src/workflows` returns only the step file itself and the `v2Registry` import \u2014 no module imports it into a rule.\n- Registry membership isn't wiring: `V2_REGISTRY` is consumed only by `getStaticStepDefinitions()`, which publishes step-definition metadata and validation JSON schemas. A step reaches a flow only via a direct import + `rule({ key, step })` in a module.\n- The rule that was removed also filtered on `otherClassification === WEATHER`, so even the historical data is limited to weather-classified Sidekick claims filed before that date.\n- The only other backend references are read-side (loss-domain mapping, carrier payload builders). Nothing else writes `party.weatherUserDescriptors`.\n\nSo `party.weatherUserDescriptors` is effectively a **legacy field**: no new Sidekick claim can populate it, and the FNOL \"reporter declined / had no forecast\" route is the only way to produce these cards on a new claim.\n\nTo be clear about what this is and isn't: the code is **not wrong**. Reading the party field is still correct for pre-May-2026 weather claims, and I'd rather it be read than silently dropped. What needs fixing is the framing \u2014 three places currently assert a live second source:\n\n1. **This section** \u2014 \"The Sidekick `weatherUserDescriptors_v2` step persists the same enum onto the **reporting party**\" (present tense). Suggest noting that the step was unwired by AUTO-7001 on 2026-05-11 and that this path now only covers claims filed before then.\n2. **`$reportingPartyWeatherDescriptors`'s JSDoc** in `AutoIncidentWeatherAccessor.ts` \u2014 \"Sidekick records weather descriptors on the reporting party\" reads as current behavior. This is exactly the kind of non-obvious historical constraint that earns a JSDoc, so it's worth spelling out there rather than only here.\n3. **The MR description** \u2014 \"Sidekick reads the reporting party's weather descriptors\" sits alongside the FNOL source as a peer.\n\nThen there's a product call worth making explicitly rather than by default:\n\n- **Keep the branch** (my suggestion) if pre-May-2026 weather claims still get looked at \u2014 it's cheap, already tested, and dropping it would silently lose those cards. Just label it as the legacy path in all three places above.\n- **Drop it** if those claims are out of scope, which would also remove the fragment field, `$reportingPartyWeatherDescriptors`, the `in`-guard from my other comment, and 3 of the 9 tests \u2014 a decent simplification.\n\nEither way, worth deciding on purpose. Happy to be wrong if AUTO-7001 was reverted somewhere I didn't look, or if there's a re-wiring in flight.\n\ncc @alicia.palmer \u2014 this is why I corrected the repro steps in my other note; a fresh Sidekick claim can't reach these cards."
+        },
+        {
+          "id": 3699386551,
+          "name": "Jorge Coello",
+          "username": "jorgecoello",
+          "at": "2025-08-19T08:59:49.159Z",
+          "body": "Kept the branch and labeled it legacy, per your suggestion. Sources doc, the\n$reportingPartyWeatherDescriptors JSDoc, and the MR description all now cite\nAUTO-7001 / 70ade66f. Confirmed it has not been reverted."
+        }
+      ]
+    },
+    {
+      "status": "replied",
+      "notes": [
+        {
+          "id": 3697107979,
+          "name": "Doug Treadwell",
+          "username": "doug-at-assured",
+          "at": "2025-08-18T20:32:57.127Z",
+          "body": "[NON-BLOCKING] `$wasHot` and `$wasCold` are byte-identical apart from the descriptor \u2014 worth pulling the shared shape into a private helper so the two-persistence-homes rule lives in one place:\n\n```ts\n/**\n * Whether the reporter described the weather as `descriptor`, from either\n * persistence home: FNOL writes the incident column, Sidekick wrote the\n * reporting party. Reading only one silently drops that module's answers.\n */\nprivate $userReportedWeather(\n  descriptor: WeatherDescriptor,\n): AnnotatedLeaf<boolean> {\n  return $hasMatchingWeatherCondition([\n    ...filterByValue(this.incident.$incidentWeatherUserDescriptors, [descriptor]),\n    ...filterByValue($reportingPartyWeatherDescriptors(this.incident), [descriptor]),\n  ]);\n}\n\nget $wasHot(): AnnotatedLeaf<boolean> {\n  return this.$userReportedWeather(WeatherDescriptor.Hot);\n}\n\nget $wasCold(): AnnotatedLeaf<boolean> {\n  return this.$userReportedWeather(WeatherDescriptor.Cold);\n}\n```\n\nThree things this buys beyond the line count:\n\n- **One place to change.** Right now the \"check both homes\" rule is duplicated, so the next descriptor that needs both \u2014 or any fix to the FNOL/Sidekick precedence \u2014 has to be applied twice, and the failure mode of applying it once is silent (a card just stops firing for one module).\n- **A home for the JSDoc.** The two-homes constraint is genuinely non-obvious and currently only explained on `$reportingPartyWeatherDescriptors` and in the sources doc. On the helper it sits where the next person actually reads it.\n- **Halves the reporting-party walk.** `$reportingPartyWeatherDescriptors` runs `getReportingParty` on every read, and the finder reads both getters on every render, so today that's four party-roster scans per render for two cards. This doesn't fix that on its own, but it gives you one call site to memoize if it ever matters.\n\nTo be explicit about what I'm *not* suggesting: don't collapse the two `filterByValue` calls. They read genuinely different fields on different objects (`AutoClaimIncident.incidentWeatherUserDescriptors` vs `AutoParty.weatherUserDescriptors`), and nothing bridges them \u2014 that pair is the point of the helper, not duplication.\n\nWorth sequencing this after the Sidekick-legacy question on `temperatureFactor.highlightFact.sources.md`: if that branch gets dropped, the helper is a one-liner over the incident array instead, and it'd be wasted effort to write it twice."
+        },
+        {
+          "id": 3699386009,
+          "name": "Jorge Coello",
+          "username": "jorgecoello",
+          "at": "2025-08-19T08:59:45.530Z",
+          "body": "Extracted a private $userReportedWeather(descriptor); both getters delegate to it.\nThe two filterByValue calls stay separate, and the two-persistence-homes JSDoc moved\nonto the helper. Tests pass (11)."
+        }
+      ]
+    },
+    {
+      "status": "replied",
+      "notes": [
+        {
+          "id": 3697127053,
+          "name": "Doug Treadwell",
+          "username": "doug-at-assured",
+          "at": "2025-08-18T20:42:41.409Z",
+          "body": "@jorgecoello \u2014 heads-up, not a change request: I've opened a question for Design and PM on the ticket, and it may generate a follow-up. **Nothing here blocks this MR** \u2014 what you built matches the AC and the Figma copy.\n\n\ud83d\udc49 [New comment on CV-1730 for @adam.peterson and @paul_rivera](https://linear.app/assured/issue/CV-1730/highlight-temperature-factor#comment-59c64862)\n\n**The question:** should an *accepted* forecast temperature also produce these cards? Right now the descriptors multi-select only appears when the reporter answers \"Nope\" to the forecast-confirm step (or when no forecast could be derived). On the common path \u2014 \"Yes, that's correct\" \u2014 we never ask, so no Temperature factor card.\n\nWhat makes it worth asking rather than obviously out of scope: that confirmation screen renders the actual temperature (`{forecast.temperature.toFixed(0)}\u00b0F` in `WeatherForecast.tsx`), so a reporter who accepts it has looked at \"98\u00b0F\" and affirmed it. Whether that counts as \"Lisa said it was hot\" is a product/design call, not an engineering one.\n\nIf they say yes, three things need their answers first \u2014 thresholds (Weston's 1 May comment on the ticket is still the open item there; the weather service's own `Hot`/`Frigid` condition codes are one way to avoid picking numbers), copy and attribution, and whether it extends CV-1730 or becomes a new ticket. I suggested a follow-up so this MR isn't held up.\n\nRelated, and the reason I raised it: combined with the Sidekick step being unwired (see my comment on `temperatureFactor.highlightFact.sources.md`), the cards as shipped will only appear on FNOL claims where the reporter rejected or lacked a forecast. That's a narrower slice than the ticket probably assumed, so it seemed worth surfacing to PM now rather than after someone asks why the highlight never shows up."
+        },
+        {
+          "id": 3699385799,
+          "name": "Jorge Coello",
+          "username": "jorgecoello",
+          "at": "2025-08-19T08:59:43.176Z",
+          "body": "Agreed, this MR stays on user-reported HOT/COLD. I documented under \"Not used\" that\nconfirming the forecast never collects HOT/COLD, so a missing card there is intake\nbehavior, not a CVI bug. Happy to take the follow-up once thresholds and copy are\ndecided."
+        }
+      ]
+    }
+  ],
+  "comments": [
+    {
+      "id": 3696608679,
+      "name": "Danny B.",
+      "username": "dannybrahman",
+      "at": "2025-08-18T17:49:31.938Z",
+      "body": "[vc]: #d2Cow48GJVy3rNLf22i70mA6bG2oeGWYnOsjSmM0KYk=:eyJpc01vbm9yZXBvIjp0cnVlLCJ0eXBlIjoiZ2l0bGFiIiwicHJvamVjdHMiOlt7Im5hbWUiOiJkZXYtZnJvbnRlbmQiLCJwcm9qZWN0SWQiOiJwcmpfWTREbzRzMzNMN2JCUmJkbzk2Q29MQ0pqUlF1aSIsInJvb3REaXJlY3RvcnkiOiJhcHBzL2Zyb250ZW5kIiwiaW5zcGVjdG9yVXJsIjoiaHR0cHM6Ly92ZXJjZWwuY29tL2Fzc3VyZWQvZGV2LWZyb250ZW5kLzZYcHVYZHVwRzlmMnp0YUNuaTNobldRQXZyb3QiLCJwcmV2aWV3VXJsIjoiZGV2LWZyb250ZW5kLWdpdC1mZWF0dXJlLWN2LTE3MzAtaGlnaGxpZ2h0LXRlbXBlLWE2NDE1Yi1hc3N1cmVkLnZlcmNlbC5hcHAiLCJuZXh0Q29tbWl0U3RhdHVzIjoiREVQTE9ZRUQifSx7Im5hbWUiOiJkZXYtYWRqdXN0ZXIiLCJwcm9qZWN0SWQiOiJwcmpfbFJ4Q0dKSDRQQXhITE5MbzZqNnN0bGd4Zms5bSIsInJvb3REaXJlY3RvcnkiOiJhcHBzL2FkanVzdGVyIiwiaW5zcGVjdG9yVXJsIjoiaHR0cHM6Ly92ZXJjZWwuY29tL2Fzc3VyZWQvZGV2LWFkanVzdGVyLzVla2NucEdIOEVWdFRQblV3ZUZEQ0Z5NnBtYVUiLCJwcmV2aWV3VXJsIjoiZGV2LWFkanVzdGVyLWdpdC1mZWF0dXJlLWN2LTE3MzAtaGlnaGxpZ2h0LXRlbXBlLTEwZmRlNi1hc3N1cmVkLnZlcmNlbC5hcHAiLCJuZXh0Q29tbWl0U3RhdHVzIjoiREVQTE9ZRUQifV19\nThe latest updates on your projects. Learn more about [Vercel for GitLab](https://vercel.link/gitlab-learn-more).\n\n| Project | Deployment | Review | Updated (UTC) |\n| :--- | :----- | :------ | :------ |\n| [dev-adjuster](https://vercel.com/assured/dev-adjuster) | ![Ready](https://vercel.com/static/status/ready.svg) [Ready](https://vercel.com/assured/dev-adjuster/5ekcnpGH8EVtTPnUweFDCFy6pmaU) | [Preview](https://dev-adjuster-git-feature-cv-1730-highlight-tempe-10fde6-assured.vercel.app) | Aug 18, 2026 11:56am |\n| [dev-frontend](https://vercel.com/assured/dev-frontend) | ![Ready](https://vercel.com/static/status/ready.svg) [Ready](https://vercel.com/assured/dev-frontend/6XpuXdupG9f2ztaCni3hnWQAvrot) | [Preview](https://dev-frontend-git-feature-cv-1730-highlight-tempe-a6415b-assured.vercel.app) | Aug 18, 2026 11:56am |"
+    }
+  ]
+}
