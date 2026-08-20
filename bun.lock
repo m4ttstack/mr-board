@@ -28,10 +28,6 @@
       },
     },
   },
-  "overrides": {
-    "@soribashi/factory": "file:../soribashi/packages/factory",
-    "@soribashi/theme": "file:../soribashi/packages/theme",
-  },
   "packages": {
     "@blazediff/core": ["@blazediff/core@1.9.1", "", {}, "sha512-ehg3jIkYKulZh+8om/O25vkvSsXXwC+skXmyA87FFx6A/45eqOkZsBltMw/TVteb0mloiGT8oGRTcjRAz66zaA=="],
 
